@@ -8,10 +8,12 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import ValidationError
 
+from bunkerweb_mcp.client import BunkerWebClient
 from bunkerweb_mcp.config import Settings
 from bunkerweb_mcp.exceptions import ToolValidationError
 from bunkerweb_mcp.mcp_adapter import create_fastmcp_server
@@ -19,6 +21,7 @@ from bunkerweb_mcp.redaction import (
     DEFAULT_REDACT_PATTERN,
     REDACTED,
     RedactionPolicy,
+    effective_cache_file_name,
     policy_from_settings,
 )
 from bunkerweb_mcp.schemas.common import ApiResponse
@@ -521,3 +524,49 @@ def test_empty_redact_pattern_falls_back_to_default() -> None:
 def test_invalid_redact_pattern_fails_settings_validation() -> None:
     with pytest.raises(ValidationError, match="BUNKERWEB_REDACT_PATTERN"):
         Settings(BUNKERWEB_REDACT_PATTERN="(unclosed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("plugin", "job_name", "file_name"),
+    [
+        ("bunkernet", "job", "%69nstance.id"),
+        ("misc/../letsencrypt", "job", "credentials.ini"),
+        ("misc", "x/../../letsencrypt/job", "credentials.ini"),
+        ("misc", "job", "x/../../../letsencrypt/job/credentials.ini"),
+        ("other", "job", "client%2ekey"),
+        ("misc", "job", "folder:instance.id"),
+        ("misc", "job", "folder:certs_client.key"),
+    ],
+)
+async def test_cache_alias_inputs_never_reach_upstream(
+    plugin: str, job_name: str, file_name: str
+) -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "success", "data": FAKE_SECRET})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://testserver"
+    ) as async_client:
+        client = BunkerWebClient(
+            Settings.model_validate({"BUNKERWEB_BASE_URL": "http://testserver"}),
+            client=async_client,
+        )
+        with pytest.raises(ToolValidationError):
+            await _call(
+                _tools(client),
+                "cache_fetch_file",
+                {"plugin": plugin, "job_name": job_name, "file_name": file_name},
+            )
+        await client.close()
+
+    assert requests == []
+
+
+def test_effective_cache_file_name() -> None:
+    assert effective_cache_file_name("folder:instance.id") == "instance.id"
+    assert effective_cache_file_name("folder:a_b_c.pem") == "a/b/c.pem"
+    assert effective_cache_file_name("plain_name.txt") == "plain_name.txt"

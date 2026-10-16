@@ -38,6 +38,27 @@ DEFAULT_SENSITIVE_CACHE_PLUGINS = frozenset({"letsencrypt", "customcert", "selfs
 # (default-server-cert.key, api-server-cert.key, client-key.pem, instance.id).
 SENSITIVE_CACHE_FILE_PATTERN = re.compile(r"(?:\.key|key\.pem|^instance\.id)$", re.IGNORECASE)
 
+
+# BunkerWeb v1.6.15 src/api/app/routers/cache.py, _transform_filename:
+#     # UI uses a special encoding for folders: prefix "folder:" and replace '_' with '/'
+#     if path_token.startswith("folder:"):
+#         return path_token.replace("_", "/")[len("folder:") :]
+#     return path_token
+def effective_cache_file_name(file_name: str) -> str:
+    """Return the file name BunkerWeb looks up for a cache path token.
+
+    Args:
+        file_name: Last path token of ``/cache/{service}/{plugin}/{job}/{file}``.
+
+    Returns:
+        The name the API fetches: a ``folder:`` token loses its prefix and every
+        ``_`` becomes ``/``; any other token is unchanged.
+    """
+    if file_name.startswith("folder:"):
+        return file_name.replace("_", "/")[len("folder:") :]
+    return file_name
+
+
 # Tools that write BunkerWeb settings, mapped to the parameter holding them.
 SETTINGS_WRITE_FIELDS: dict[str, str] = {
     "create_service": "variables",
@@ -98,7 +119,10 @@ class RedactionPolicy:
         """
         if plugin is not None and plugin.lower() in self.sensitive_cache_plugins:
             return True
-        return file_name is not None and SENSITIVE_CACHE_FILE_PATTERN.search(file_name) is not None
+        if file_name is None:
+            return False
+        basename = effective_cache_file_name(file_name).rsplit("/", 1)[-1]
+        return SENSITIVE_CACHE_FILE_PATTERN.search(basename) is not None
 
     def redact(self, obj: Any) -> Any:
         """Return a copy of ``obj`` with the values of sensitive keys masked.
