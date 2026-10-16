@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 from enum import StrEnum
 from typing import Any
 
 import httpx
 from pydantic import BaseModel
+
+from .config import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,20 +56,16 @@ class SearchClient:
         self._http_client: httpx.AsyncClient | None = None
 
     @classmethod
-    def from_env(cls) -> SearchClient:
-        """Create client from environment variables."""
-        mode = os.getenv("SEARCH_MODE", "remote")
-        api_url = os.getenv("SEARCH_API_URL", "http://localhost:8000")
-        timeout = float(os.getenv("SEARCH_TIMEOUT", "10.0"))
-
-        enabled = mode == SearchMode.REMOTE
+    def from_settings(cls, settings: Settings) -> SearchClient:
+        """Create client from the application settings."""
+        enabled = settings.search_mode == SearchMode.REMOTE
 
         if not enabled:
-            LOGGER.info("Search is disabled (SEARCH_MODE=%s)", mode)
+            LOGGER.info("Search is disabled (SEARCH_MODE=%s)", settings.search_mode)
 
         return cls(
-            api_url=api_url,
-            timeout=timeout,
+            api_url=settings.search_api_url,
+            timeout=settings.search_timeout,
             enabled=enabled,
         )
 
@@ -140,48 +137,6 @@ class SearchClient:
             # Return empty results instead of raising
             # This makes search failures graceful
             return []
-
-    async def health_check(self) -> dict[str, Any]:
-        """
-        Check search service health.
-
-        Returns:
-            Health status dict
-
-        Raises:
-            httpx.HTTPError: If health check fails
-        """
-        if not self.enabled:
-            return {"status": "disabled"}
-
-        if not self._http_client:
-            self._http_client = httpx.AsyncClient(timeout=self.timeout)
-
-        response = await self._http_client.get(f"{self.api_url}/health")
-        response.raise_for_status()
-        return response.json()  # type: ignore[no-any-return]
-
-    async def list_categories(self) -> list[str]:
-        """
-        List available documentation categories.
-
-        Returns:
-            List of category names
-
-        Raises:
-            httpx.HTTPError: If request fails
-        """
-        if not self.enabled:
-            return []
-
-        if not self._http_client:
-            self._http_client = httpx.AsyncClient(timeout=self.timeout)
-
-        response = await self._http_client.get(f"{self.api_url}/categories")
-        response.raise_for_status()
-
-        data = response.json()
-        return data.get("categories", [])  # type: ignore[no-any-return]
 
 
 __all__ = ["SearchClient", "SearchMode", "SearchResult"]

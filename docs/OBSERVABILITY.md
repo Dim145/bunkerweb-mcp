@@ -151,6 +151,7 @@ from bunkerweb_mcp.tracing import get_tracer
 
 tracer = get_tracer(__name__)
 
+
 async def my_function():
     with tracer.start_as_current_span("my_operation") as span:
         span.set_attribute("custom_attribute", "value")

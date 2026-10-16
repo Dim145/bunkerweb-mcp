@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.server.mcpserver.prompts.base import Message, Prompt
-from mcp.server.mcpserver.resources import FunctionResource
+from mcp.server.mcpserver.resources import FunctionResource, TextResource
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined  # type: ignore[attr-defined]
 
+from . import __version__
 from .config import Settings
 from .exceptions import BunkerWebError, ToolExecutionError, ToolValidationError
+from .skill_catalog import SKILL_URI_PREFIX, SkillEntry, load_skills
 from .tools import Tools
 
 ToolHandler = Callable[[BaseModel], Awaitable[dict[str, Any]]]
@@ -68,13 +70,18 @@ def _build_prompt_callable(name: str, prompt_text: str) -> Callable[[], Awaitabl
 def create_fastmcp_server(settings: Settings, tools: Tools) -> MCPServer:
     """Instantiate and populate a MCPServer server instance."""
 
-    server = MCPServer(
-        name="BunkerWeb MCP Server",
-        instructions=(
-            "Manage BunkerWeb resources through the official MCP server. "
-            f"Target API base: {settings.bunkerweb_base_url}."
-        ),
+    instructions = (
+        "Manage BunkerWeb resources through the official MCP server. "
+        f"Target API base: {settings.bunkerweb_base_url}."
     )
+    skills = load_skills() if settings.skills_enabled else ()
+    if skills:
+        instructions += (
+            f" BunkerWeb Agent Skills are served as resources under {SKILL_URI_PREFIX}/; "
+            f"start with {SKILL_URI_PREFIX}/bunkerweb/SKILL.md."
+        )
+
+    server = MCPServer(name="BunkerWeb MCP Server", version=__version__, instructions=instructions)
 
     # Register all tools from the tools registry
     for name, params_model, handler, description, prompt_text in tools.iter_registered():
@@ -97,11 +104,30 @@ def create_fastmcp_server(settings: Settings, tools: Tools) -> MCPServer:
 
     # Register MCP resources for read-only data access
     _register_resources(server, tools)
+    _register_skill_resources(server, skills)
 
     # Register semantic search tool
-    _register_search_tool(server)
+    _register_search_tool(server, settings)
 
     return server
+
+
+def _register_skill_resources(server: MCPServer, skills: Sequence[SkillEntry]) -> None:
+    """Serve every file of every bundled skill as a text resource."""
+
+    for entry in skills:
+        prefix = f"{SKILL_URI_PREFIX}/{entry.name}/"
+        for file in entry.files:
+            is_skill_md = file.uri == entry.uri
+            server.add_resource(
+                TextResource(
+                    uri=file.uri,
+                    name=entry.name if is_skill_md else file.uri.removeprefix(prefix),
+                    description=entry.frontmatter["description"] if is_skill_md else None,
+                    mime_type=file.mime_type,
+                    text=file.text,
+                )
+            )
 
 
 def _register_resources(server: MCPServer, tools: Tools) -> None:
@@ -213,7 +239,7 @@ def _register_resources(server: MCPServer, tools: Tools) -> None:
     )
 
 
-def _register_search_tool(server: MCPServer) -> None:
+def _register_search_tool(server: MCPServer, settings: Settings) -> None:
     """Register the semantic search tool for BunkerWeb documentation."""
     import logging
 
@@ -223,8 +249,7 @@ def _register_search_tool(server: MCPServer) -> None:
     try:
         from .search_client import SearchClient
 
-        # Create client from environment variables
-        search_client = SearchClient.from_env()
+        search_client = SearchClient.from_settings(settings)
 
         if not search_client.enabled:
             logger.info("Search is disabled (SEARCH_MODE=disabled)")

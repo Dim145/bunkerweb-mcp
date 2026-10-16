@@ -331,13 +331,6 @@ class Tools:
         for name, (model, handler) in self._registry.items():
             yield name, model, handler, TOOL_DESCRIPTIONS[name], self._prompt_catalog.get(name)
 
-    def get_params_model(self, name: str) -> type[_BaseToolParams] | None:
-        """Get the parameter model for a tool."""
-        entry = self._registry.get(name)
-        if entry is None:
-            return None
-        return entry[0]
-
     def get_tool(self, name: str) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None:
         """Get an executable tool by name."""
         entry = self._registry.get(name)

@@ -1,0 +1,10 @@
+-r requirements.in
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+asgiref==3.12.1
+ruff==0.17.1
+mypy==2.4.0
+bandit==1.9.4
+locust==2.46.7
+pre-commit==4.7.0

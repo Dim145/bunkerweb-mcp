@@ -122,6 +122,12 @@ class Settings(BaseSettings):
         alias="MCP_ALLOWED_ORIGINS",
     )
 
+    skills_enabled: bool = Field(
+        default=True,
+        description="Serve the bundled BunkerWeb Agent Skills as skill:// resources.",
+        alias="MCP_ENABLE_SKILLS",
+    )
+
     # Performance Settings (Sprint 2)
     rate_limit_enabled: bool = Field(
         default=False,

@@ -1,6 +1,7 @@
 """Exercise the installed SDK over HTTP and stdio, with no upstream services."""
 
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -11,17 +12,41 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import bunkerweb_mcp
 from bunkerweb_mcp.config import Settings
 from bunkerweb_mcp.exceptions import BunkerWebError
 from bunkerweb_mcp.main import create_app
 from bunkerweb_mcp.schemas.core import PingResponse
 from bunkerweb_mcp.search_client import SearchClient, SearchResult
+from bunkerweb_mcp.skill_catalog import load_skills
 
 INITIALIZE = {
     "protocolVersion": "2025-11-25",
     "capabilities": {},
     "clientInfo": {"name": "migration-test", "version": "1.0"},
 }
+
+
+@pytest.mark.asyncio
+async def test_initialize_reports_server_version(monkeypatch):
+    settings = Settings(CACHE_ENABLED=False, SEARCH_MODE="disabled")
+    monkeypatch.setattr("bunkerweb_mcp.main.get_settings", lambda: settings)
+    app = create_app()
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(
+            transport=ASGITransport(app),
+            base_url="http://localhost",
+            headers={"accept": "application/json, text/event-stream"},
+        ) as client,
+    ):
+        response = await client.post(
+            "/mcp/",
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": INITIALIZE},
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()["result"]
+        assert result["serverInfo"]["version"] == bunkerweb_mcp.__version__
 
 
 @pytest.mark.asyncio
@@ -33,6 +58,7 @@ async def test_http_protocol_auth_security_resources_and_search(monkeypatch, tmp
         MCP_ALLOWED_HOSTS=" localhost, localhost:8080 ",
         MCP_ALLOWED_ORIGINS=" http://localhost ",
         CACHE_ENABLED=False,
+        SEARCH_MODE="remote",
     )
     upstream = SimpleNamespace(
         close=AsyncMock(),
@@ -68,7 +94,6 @@ async def test_http_protocol_auth_security_resources_and_search(monkeypatch, tmp
         doc_id="guide",
     )
     search = AsyncMock(return_value=[search_result])
-    monkeypatch.setenv("SEARCH_MODE", "remote")
     monkeypatch.setattr(SearchClient, "search", search)
     monkeypatch.setattr("bunkerweb_mcp.main.get_settings", lambda: settings)
     for module in ("ban_handlers", "config_handlers", "instance_handlers"):
@@ -147,18 +172,40 @@ async def test_http_protocol_auth_security_resources_and_search(monkeypatch, tmp
             assert prompt["messages"][0]["role"] == "user"
             assert prompt["messages"][0]["content"]["text"]
             resources = (await rpc("resources/list"))["result"]["resources"]
-            assert {r["uri"] for r in resources} == {
+            skill_files = sum(len(skill.files) for skill in load_skills())
+            assert len(resources) == 4 + skill_files
+            data_resources = [r for r in resources if not r["uri"].startswith("skill://")]
+            assert {r["uri"] for r in data_resources} == {
                 "config://global",
                 "logs://jobs",
                 "bans://active",
                 "instances://status",
             }
-            for resource in resources:
+            for resource in data_resources:
                 data = (await rpc("resources/read", {"uri": resource["uri"]}))["result"][
                     "contents"
                 ][0]
                 assert data["mimeType"] == "application/json"
                 assert json.loads(data["text"])["status"] == "success"
+
+            skill_md = next(
+                r for r in resources if r["uri"] == "skill://bunkerweb/bunkerweb/SKILL.md"
+            )
+            assert skill_md["mimeType"] == "text/markdown"
+            assert skill_md["name"] == "bunkerweb"
+            reference = next(
+                r
+                for r in resources
+                if r["uri"] == "skill://bunkerweb/bunkerweb/references/all-in-one.md"
+            )
+            assert reference["name"] == "references/all-in-one.md"
+            assert "BunkerWeb Agent Skills" in initialized["result"]["instructions"]
+            bunkerweb_skill = next(s for s in load_skills() if s.name == "bunkerweb")
+            for file in bunkerweb_skill.files:
+                content = (await rpc("resources/read", {"uri": file.uri}))["result"]["contents"][0]
+                served = content["text"].encode()
+                assert "sha256:" + hashlib.sha256(served).hexdigest() == file.digest
+                assert len(served) == file.size
 
             search_params = {"query": "configuration", "limit": 2}
             result = (

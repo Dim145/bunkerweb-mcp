@@ -12,6 +12,7 @@ from secrets import compare_digest as _compare_digest
 from typing import Any
 
 import httpx
+import limits
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse, Response
 from mcp.server.transport_security import TransportSecuritySettings
@@ -21,6 +22,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import __version__
 from .client import BunkerWebClient
 from .config import get_settings
 from .exceptions import ToolExecutionError, ToolValidationError
@@ -74,8 +76,13 @@ def create_app() -> FastAPI:
     )
     fastmcp_server = create_fastmcp_server(settings, tools)
 
-    # Initialize WebSocket rate limiter (500 messages per minute)
-    ws_rate_limiter = WebSocketRateLimiter(max_messages=500, window_seconds=60)
+    try:
+        ws_rate = limits.parse(settings.rate_limit_ws)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid RATE_LIMIT_WS {settings.rate_limit_ws!r}: {exc}") from exc
+    ws_rate_limiter = WebSocketRateLimiter(
+        max_messages=ws_rate.amount, window_seconds=ws_rate.get_expiry()
+    )
 
     # Create the streamable HTTP app first to initialize the session manager
     mcp_app: ASGIApp = fastmcp_server.streamable_http_app(
@@ -116,14 +123,14 @@ def create_app() -> FastAPI:
             finally:
                 await client.close()
 
-    app = FastAPI(title="BunkerWeb MCP Server", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="BunkerWeb MCP Server", version=__version__, lifespan=lifespan)
     app.mount("/mcp", mcp_app)
     app.state.fastmcp = fastmcp_server
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Initialize metrics
-    initialize_metrics(version="0.3.0")
+    initialize_metrics(version=__version__)
 
     # Initialize tracing
     setup_tracing(app, service_name="mcp-bunkerweb")
@@ -155,21 +162,20 @@ def create_app() -> FastAPI:
         # Add FastMCP tools (like search_bunkerweb_docs) if available
         # FastMCP tools are registered in fastmcp_server but not in the Tools object
         fastmcp_server = request.app.state.fastmcp
-        if hasattr(fastmcp_server, "_tool_manager"):
-            fastmcp_tools = fastmcp_server._tool_manager.list_tools()
-            for tool in fastmcp_tools:
-                tool_name = tool.name
-                # Skip if already in the list (avoid duplicates)
-                if not any(t.get("name") == tool_name for t in tool_list):
-                    tool_list.append(
-                        {
-                            "name": tool_name,
-                            "description": tool.description or "",
-                            "input_schema": tool.parameters
-                            if isinstance(tool.parameters, dict)
-                            else {},
-                        }
-                    )
+        fastmcp_tools = await fastmcp_server.list_tools()
+        for tool in fastmcp_tools:
+            tool_name = tool.name
+            # Skip if already in the list (avoid duplicates)
+            if not any(t.get("name") == tool_name for t in tool_list):
+                tool_list.append(
+                    {
+                        "name": tool_name,
+                        "description": tool.description or "",
+                        "input_schema": tool.input_schema
+                        if isinstance(tool.input_schema, dict)
+                        else {},
+                    }
+                )
 
         return tool_list
 
@@ -214,6 +220,7 @@ def create_app() -> FastAPI:
         if handler is None:
             fastmcp_server = request.app.state.fastmcp
             if hasattr(fastmcp_server, "_tool_manager"):
+                # ponytail: private _tool_manager for the raw fn; switch when MCPServer exposes get_tool
                 fastmcp_tool = fastmcp_server._tool_manager.get_tool(tool_name)
                 if fastmcp_tool is not None:
                     handler = fastmcp_tool.fn

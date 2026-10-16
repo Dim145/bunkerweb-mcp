@@ -13,15 +13,16 @@ filesystem) scans; none of the three overlaps with the others.
 
 | Path | Purpose |
 |---|---|
-| `.github/plumber/plumber.yaml` | Policy overlay on top of `plumber:default` |
+| `.plumber.yaml` | Policy overlay on top of `plumber:default`; at the repository root so the public scan at plumber's hosted service finds it |
 | `.github/plumber/README.md` | This file |
 | `.github/workflows/plumber.yml` | Reusable workflow invoked by the `ci` and `release` workflows |
+| `.github/workflows/scorecards-analysis.yml` | OpenSSF Scorecard; runs on `main` pushes, weekly and on branch-protection changes, never on pull requests, so its SARIF upload and score publish need no PR gating |
 
 ## Running it locally
 
 ```bash
 brew install getplumber/tap/plumber        # or: docker run ghcr.io/getplumber/plumber
-plumber analyze --config .github/plumber/plumber.yaml --score
+plumber analyze --config .plumber.yaml --score
 plumber explain ISSUE-801                  # details for a given issue code
 ```
 
@@ -31,7 +32,7 @@ without it, protection findings are incomplete rather than wrong.
 
 ## Policy
 
-`plumber.yaml` extends `plumber:default` and only adds an allowlist of the
+`.plumber.yaml` extends `plumber:default` and only adds an allowlist of the
 third-party actions this repository already relies on. Each entry names an
 exact `owner/repo` rather than an owner wildcard, so trust cannot spread to
 other or future repositories under those accounts. Every one of them is

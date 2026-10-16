@@ -89,18 +89,18 @@ from httpx import AsyncClient, Limits, Timeout
 client = AsyncClient(
     base_url="http://bw-api:8888",
     timeout=Timeout(
-        connect=5.0,   # Connection timeout
-        read=30.0,     # Read timeout
-        write=10.0,    # Write timeout
-        pool=5.0,      # Pool acquisition timeout
+        connect=5.0,  # Connection timeout
+        read=30.0,  # Read timeout
+        write=10.0,  # Write timeout
+        pool=5.0,  # Pool acquisition timeout
     ),
     limits=Limits(
-        max_connections=100,      # Total connections
+        max_connections=100,  # Total connections
         max_keepalive_connections=20,  # Keep-alive pool
-        keepalive_expiry=30.0,    # Keep-alive duration
+        keepalive_expiry=30.0,  # Keep-alive duration
     ),
-    http2=True,        # Enable HTTP/2
-    verify=True,       # SSL verification
+    http2=True,  # Enable HTTP/2
+    verify=True,  # SSL verification
     follow_redirects=True,
 )
 ```
@@ -111,13 +111,14 @@ client = AsyncClient(
 from httpx import AsyncClient, HTTPStatusError
 import asyncio
 
+
 async def request_with_retry(
     client: AsyncClient,
     method: str,
     url: str,
     max_retries: int = 3,
     backoff_factor: float = 0.5,
-    **kwargs
+    **kwargs,
 ) -> httpx.Response:
     """Execute HTTP request with exponential backoff retry."""
     for attempt in range(max_retries):
@@ -128,7 +129,7 @@ async def request_with_retry(
         except (httpx.NetworkError, httpx.TimeoutException) as exc:
             if attempt == max_retries - 1:
                 raise
-            wait_time = backoff_factor * (2 ** attempt)
+            wait_time = backoff_factor * (2**attempt)
             await asyncio.sleep(wait_time)
 ```
 
@@ -238,9 +239,9 @@ Configuration to optimize performance:
 
 ```python
 Limits(
-    max_connections=100,           # Total pool size
+    max_connections=100,  # Total pool size
     max_keepalive_connections=20,  # Keep-alive pool
-    keepalive_expiry=30.0,         # 30s keep-alive
+    keepalive_expiry=30.0,  # 30s keep-alive
 )
 ```
 
@@ -268,6 +269,7 @@ Comprehensive tests with pytest-httpx:
 ```python
 import pytest
 from pytest_httpx import HTTPXMock
+
 
 @pytest.mark.asyncio
 async def test_list_services_success(httpx_mock: HTTPXMock):
