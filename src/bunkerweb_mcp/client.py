@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 import httpx
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
+from . import __version__
 from .config import Settings, get_settings
 from .exceptions import BunkerWebError
 from .schemas.bans import BanRequestModel, BansResponse, UnbanRequestModel
@@ -62,7 +63,7 @@ class BunkerWebClient:
         self._settings = settings or get_settings()
         headers = {
             "Accept": "application/json",
-            "User-Agent": "mcp-bunkerweb/0.3.0",
+            "User-Agent": f"mcp-bunkerweb/{__version__}",
         }
         # Use secure methods to get secret values
         api_token = self._settings.get_api_token()

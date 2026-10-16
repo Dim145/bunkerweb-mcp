@@ -21,6 +21,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
+from . import __version__
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
@@ -47,7 +49,7 @@ def setup_tracing(app: FastAPI, service_name: str = "mcp-bunkerweb") -> None:
     resource = Resource.create(
         {
             "service.name": service_name,
-            "service.version": "0.3.0",
+            "service.version": __version__,
         }
     )
 

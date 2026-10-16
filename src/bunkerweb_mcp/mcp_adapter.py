@@ -14,6 +14,7 @@ from mcp.server.mcpserver.resources import FunctionResource
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined  # type: ignore[attr-defined]
 
+from . import __version__
 from .config import Settings
 from .exceptions import BunkerWebError, ToolExecutionError, ToolValidationError
 from .tools import Tools
@@ -70,6 +71,7 @@ def create_fastmcp_server(settings: Settings, tools: Tools) -> MCPServer:
 
     server = MCPServer(
         name="BunkerWeb MCP Server",
+        version=__version__,
         instructions=(
             "Manage BunkerWeb resources through the official MCP server. "
             f"Target API base: {settings.bunkerweb_base_url}."

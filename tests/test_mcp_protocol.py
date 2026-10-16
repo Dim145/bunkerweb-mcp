@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import bunkerweb_mcp
 from bunkerweb_mcp.config import Settings
 from bunkerweb_mcp.exceptions import BunkerWebError
 from bunkerweb_mcp.main import create_app
@@ -22,6 +23,28 @@ INITIALIZE = {
     "capabilities": {},
     "clientInfo": {"name": "migration-test", "version": "1.0"},
 }
+
+
+@pytest.mark.asyncio
+async def test_initialize_reports_server_version(monkeypatch):
+    settings = Settings(CACHE_ENABLED=False, SEARCH_MODE="disabled")
+    monkeypatch.setattr("bunkerweb_mcp.main.get_settings", lambda: settings)
+    app = create_app()
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(
+            transport=ASGITransport(app),
+            base_url="http://localhost",
+            headers={"accept": "application/json, text/event-stream"},
+        ) as client,
+    ):
+        response = await client.post(
+            "/mcp/",
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": INITIALIZE},
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()["result"]
+        assert result["serverInfo"]["version"] == bunkerweb_mcp.__version__
 
 
 @pytest.mark.asyncio

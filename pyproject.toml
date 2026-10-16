@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bunkerweb-mcp"
-version = "0.3.0"
+dynamic = ["version"]
 description = "MCP server that exposes BunkerWeb's API to large language models"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -63,6 +63,9 @@ Homepage = "https://www.bunkerweb.io"
 Documentation = "https://docs.bunkerweb.io"
 Repository = "https://github.com/bunkerity/bunkerweb-mcp"
 Issues = "https://github.com/bunkerity/bunkerweb-mcp/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "bunkerweb_mcp.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
