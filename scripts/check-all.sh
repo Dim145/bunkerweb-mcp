@@ -5,8 +5,8 @@ echo "🧪 Running test suite..."
 OTEL_TRACING_ENABLED=false .venv/bin/pytest tests/ -v
 
 echo ""
-echo "✨ Running ruff format..."
-.venv/bin/ruff format src/bunkerweb_mcp/
+echo "✨ Checking ruff format..."
+.venv/bin/ruff format --check src/bunkerweb_mcp/
 
 echo ""
 echo "🔍 Running ruff check..."
