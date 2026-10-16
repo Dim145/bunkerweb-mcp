@@ -7,7 +7,6 @@ import binascii
 import logging
 import re
 from dataclasses import dataclass, field
-from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -317,14 +316,8 @@ def withheld_error(exc: Exception) -> Exception:
     if isinstance(exc, BunkerWebError):
         if exc.status is None:
             return exc
-        return BunkerWebError(
-            _UPSTREAM_ERROR_WITHHELD.format(status=int(exc.status)), status=exc.status
-        )
+        return BunkerWebError(_UPSTREAM_ERROR_WITHHELD.format(status=exc.status), status=exc.status)
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
-        try:
-            status: HTTPStatus | None = HTTPStatus(code)
-        except ValueError:
-            status = None
-        return BunkerWebError(_UPSTREAM_ERROR_WITHHELD.format(status=code), status=status)
+        return BunkerWebError(_UPSTREAM_ERROR_WITHHELD.format(status=code), status=code)
     return ToolExecutionError("Unexpected tool execution error")

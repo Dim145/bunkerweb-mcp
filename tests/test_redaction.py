@@ -761,3 +761,30 @@ async def test_withheld_error_drops_cause(caplog: pytest.LogCaptureFixture) -> N
     assert excinfo.value.__suppress_context__ is True
     assert UPSTREAM_SECRET not in str(excinfo.value)
     _assert_nothing_logged(caplog)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("redact", [True, False])
+async def test_nonstandard_upstream_status_keeps_the_status(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, redact: bool
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(499, json={"status": "error", "message": f"token={UPSTREAM_SECRET}"})
+
+    settings = _upstream_settings(monkeypatch, redact=redact)
+    async with _upstream_client(settings, handler) as client:
+        server = create_fastmcp_server(settings, _tools(client, policy_from_settings(settings)))
+        with pytest.raises(ToolError) as excinfo:
+            await server.call_tool("global_config_read", {})
+
+    message = str(excinfo.value)
+    if redact:
+        assert "HTTP 499" in message
+        assert "details withheld" in message
+        assert UPSTREAM_SECRET not in message
+        _assert_nothing_logged(caplog)
+    else:
+        assert f"token={UPSTREAM_SECRET}" in message
+        assert "Unexpected tool execution error" not in message

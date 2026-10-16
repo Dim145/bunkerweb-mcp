@@ -162,7 +162,7 @@ class BunkerWebClient:
                         raise
                     raise BunkerWebError(
                         message=self._extract_error_message(response),
-                        status=HTTPStatus(response.status_code),
+                        status=response.status_code,
                     ) from exc
                 return response
 
