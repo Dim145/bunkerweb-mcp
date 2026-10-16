@@ -51,6 +51,8 @@ jobs:
         run: |
           ruff check src/ tests/
           ruff format --check src/ tests/
+      - name: Pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
       - name: Type check
         run: mypy src/ --strict
       - name: Security scan
