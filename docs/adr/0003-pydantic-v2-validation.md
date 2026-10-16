@@ -97,14 +97,15 @@ Pydantic is the standard tool for validation in Python, but two major versions c
 ```python
 from pydantic import BaseModel, ConfigDict
 
+
 class _BaseToolParams(BaseModel):
     """Base class for all tool parameter models."""
 
     model_config = ConfigDict(
-        extra='forbid',           # Reject unknown fields
-        validate_assignment=True, # Validate on assignment
-        strict=False,             # Allow coercion (e.g., "123" -> 123)
-        use_enum_values=True,     # Use enum values directly
+        extra="forbid",  # Reject unknown fields
+        validate_assignment=True,  # Validate on assignment
+        strict=False,  # Allow coercion (e.g., "123" -> 123)
+        use_enum_values=True,  # Use enum values directly
     )
 ```
 

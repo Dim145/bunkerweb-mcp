@@ -147,8 +147,9 @@ from sentence_transformers import SentenceTransformer
 import faiss
 
 app = FastAPI()
-model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-index = faiss.read_index('search_index.faiss')
+model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+index = faiss.read_index("search_index.faiss")
+
 
 @app.post("/search")
 async def search(query: str, limit: int = 5):
