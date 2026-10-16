@@ -191,7 +191,11 @@ class RedactionPolicy:
             file_name if isinstance(file_name, str) else None,
         ):
             return {
-                key: REDACTED if key == "data" and value not in (None, "") else value
+                key: (
+                    REDACTED
+                    if key == "data" and value not in (None, "")
+                    else self.redact_cache_entries(value)
+                )
                 for key, value in obj.items()
             }
         return {key: self.redact_cache_entries(value) for key, value in obj.items()}

@@ -453,6 +453,32 @@ async def test_cache_list_masks_sensitive_entries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cache_list_masks_nested_sensitive_entries() -> None:
+    entries = [
+        {
+            "plugin_id": "letsencrypt",
+            "file_name": "credentials_abc.ini",
+            "data": FAKE_SECRET,
+            "extra": [{"plugin_id": "customcert", "file_name": "a.key", "data": FAKE_SECRET}],
+        }
+    ]
+    client = SimpleNamespace(
+        list_cache=AsyncMock(return_value=ApiResponse(status="success", data=entries))
+    )
+
+    result = await _call(_tools(client), "cache_list", {"with_data": True})
+
+    assert result["data"] == [
+        {
+            "plugin_id": "letsencrypt",
+            "file_name": "credentials_abc.ini",
+            "data": REDACTED,
+            "extra": [{"plugin_id": "customcert", "file_name": "a.key", "data": REDACTED}],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_authenticate_token_is_redacted() -> None:
     client = SimpleNamespace(
         authenticate=AsyncMock(return_value=AuthResponse(status="success", token=FAKE_SECRET))
