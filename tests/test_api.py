@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -318,6 +318,51 @@ async def test_tools_endpoint_returns_descriptors(app) -> None:
     for item in payload:
         if item["name"] in TOOL_PROMPTS:
             assert item.get("prompt") == TOOL_PROMPTS[item["name"]]
+
+
+@pytest.mark.asyncio
+async def test_tools_endpoint_lists_sdk_tool_schema() -> None:
+    settings = Settings(SEARCH_MODE="remote", SEARCH_API_URL="http://search.invalid")
+    with (
+        patch("bunkerweb_mcp.main.get_settings", return_value=settings),
+        patch("bunkerweb_mcp.main.BunkerWebClient", return_value=DummyClient()),
+    ):
+        app = create_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        with patch.object(
+            app.state.fastmcp,
+            "list_tools",
+            new_callable=AsyncMock,
+            wraps=app.state.fastmcp.list_tools,
+        ) as list_tools:
+            response = await client.get("/tools")
+            list_tools.assert_awaited_once_with()
+
+    assert response.status_code == 200
+    tool = next(item for item in response.json() if item["name"] == "search_bunkerweb_docs")
+    assert set(tool) == {"name", "description", "input_schema"}
+    assert tool["input_schema"] == {
+        "properties": {
+            "query": {"title": "Query", "type": "string"},
+            "limit": {"default": 5, "title": "Limit", "type": "integer"},
+            "category": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "default": None,
+                "title": "Category",
+            },
+            "min_score": {"default": 0.2, "title": "Min Score", "type": "number"},
+            "max_content_length": {
+                "default": 500,
+                "title": "Max Content Length",
+                "type": "integer",
+            },
+        },
+        "required": ["query"],
+        "title": "search_bunkerweb_docsArguments",
+        "type": "object",
+    }
 
 
 @pytest.mark.asyncio

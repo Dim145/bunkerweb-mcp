@@ -105,6 +105,9 @@ class StubClient:
 class StubFastMCP:
     """Stub FastMCP server for testing."""
 
+    async def list_tools(self) -> list[Any]:
+        return []
+
     def streamable_http_app(self, **kwargs):
         """Return a stub ASGI app."""
         from fastapi import FastAPI

@@ -138,47 +138,5 @@ class SearchClient:
             # This makes search failures graceful
             return []
 
-    async def health_check(self) -> dict[str, Any]:
-        """
-        Check search service health.
-
-        Returns:
-            Health status dict
-
-        Raises:
-            httpx.HTTPError: If health check fails
-        """
-        if not self.enabled:
-            return {"status": "disabled"}
-
-        if not self._http_client:
-            self._http_client = httpx.AsyncClient(timeout=self.timeout)
-
-        response = await self._http_client.get(f"{self.api_url}/health")
-        response.raise_for_status()
-        return response.json()  # type: ignore[no-any-return]
-
-    async def list_categories(self) -> list[str]:
-        """
-        List available documentation categories.
-
-        Returns:
-            List of category names
-
-        Raises:
-            httpx.HTTPError: If request fails
-        """
-        if not self.enabled:
-            return []
-
-        if not self._http_client:
-            self._http_client = httpx.AsyncClient(timeout=self.timeout)
-
-        response = await self._http_client.get(f"{self.api_url}/categories")
-        response.raise_for_status()
-
-        data = response.json()
-        return data.get("categories", [])  # type: ignore[no-any-return]
-
 
 __all__ = ["SearchClient", "SearchMode", "SearchResult"]

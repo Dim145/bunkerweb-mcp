@@ -156,21 +156,20 @@ def create_app() -> FastAPI:
         # Add FastMCP tools (like search_bunkerweb_docs) if available
         # FastMCP tools are registered in fastmcp_server but not in the Tools object
         fastmcp_server = request.app.state.fastmcp
-        if hasattr(fastmcp_server, "_tool_manager"):
-            fastmcp_tools = fastmcp_server._tool_manager.list_tools()
-            for tool in fastmcp_tools:
-                tool_name = tool.name
-                # Skip if already in the list (avoid duplicates)
-                if not any(t.get("name") == tool_name for t in tool_list):
-                    tool_list.append(
-                        {
-                            "name": tool_name,
-                            "description": tool.description or "",
-                            "input_schema": tool.parameters
-                            if isinstance(tool.parameters, dict)
-                            else {},
-                        }
-                    )
+        fastmcp_tools = await fastmcp_server.list_tools()
+        for tool in fastmcp_tools:
+            tool_name = tool.name
+            # Skip if already in the list (avoid duplicates)
+            if not any(t.get("name") == tool_name for t in tool_list):
+                tool_list.append(
+                    {
+                        "name": tool_name,
+                        "description": tool.description or "",
+                        "input_schema": tool.input_schema
+                        if isinstance(tool.input_schema, dict)
+                        else {},
+                    }
+                )
 
         return tool_list
 
@@ -215,6 +214,7 @@ def create_app() -> FastAPI:
         if handler is None:
             fastmcp_server = request.app.state.fastmcp
             if hasattr(fastmcp_server, "_tool_manager"):
+                # ponytail: private _tool_manager for the raw fn; switch when MCPServer exposes get_tool
                 fastmcp_tool = fastmcp_server._tool_manager.get_tool(tool_name)
                 if fastmcp_tool is not None:
                     handler = fastmcp_tool.fn
