@@ -12,6 +12,7 @@ from secrets import compare_digest as _compare_digest
 from typing import Any
 
 import httpx
+import limits
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse, Response
 from mcp.server.transport_security import TransportSecuritySettings
@@ -69,8 +70,13 @@ def create_app() -> FastAPI:
     tools = Tools(client, prompt_catalog=prompt_catalog, logs_path=logs_path)
     fastmcp_server = create_fastmcp_server(settings, tools)
 
-    # Initialize WebSocket rate limiter (500 messages per minute)
-    ws_rate_limiter = WebSocketRateLimiter(max_messages=500, window_seconds=60)
+    try:
+        ws_rate = limits.parse(settings.rate_limit_ws)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid RATE_LIMIT_WS {settings.rate_limit_ws!r}: {exc}") from exc
+    ws_rate_limiter = WebSocketRateLimiter(
+        max_messages=ws_rate.amount, window_seconds=ws_rate.get_expiry()
+    )
 
     # Create the streamable HTTP app first to initialize the session manager
     mcp_app: ASGIApp = fastmcp_server.streamable_http_app(

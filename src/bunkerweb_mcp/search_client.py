@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 from enum import StrEnum
 from typing import Any
 
 import httpx
 from pydantic import BaseModel
+
+from .config import Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,20 +56,16 @@ class SearchClient:
         self._http_client: httpx.AsyncClient | None = None
 
     @classmethod
-    def from_env(cls) -> SearchClient:
-        """Create client from environment variables."""
-        mode = os.getenv("SEARCH_MODE", "remote")
-        api_url = os.getenv("SEARCH_API_URL", "http://localhost:8000")
-        timeout = float(os.getenv("SEARCH_TIMEOUT", "10.0"))
-
-        enabled = mode == SearchMode.REMOTE
+    def from_settings(cls, settings: Settings) -> SearchClient:
+        """Create client from the application settings."""
+        enabled = settings.search_mode == SearchMode.REMOTE
 
         if not enabled:
-            LOGGER.info("Search is disabled (SEARCH_MODE=%s)", mode)
+            LOGGER.info("Search is disabled (SEARCH_MODE=%s)", settings.search_mode)
 
         return cls(
-            api_url=api_url,
-            timeout=timeout,
+            api_url=settings.search_api_url,
+            timeout=settings.search_timeout,
             enabled=enabled,
         )
 

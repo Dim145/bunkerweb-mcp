@@ -10,6 +10,7 @@ from bunkerweb_mcp.mcp_adapter import (
     _build_tool_callable,
     create_fastmcp_server,
 )
+from bunkerweb_mcp.search_client import SearchClient
 
 
 class StubFieldInfo:
@@ -233,3 +234,17 @@ async def test_resources_are_registered():
             "instances://status",
         }
         assert resource_uris == expected_uris
+
+
+def test_search_client_from_settings():
+    settings = Settings(SEARCH_MODE="remote", SEARCH_API_URL="http://x", SEARCH_TIMEOUT=3.5)
+
+    client = SearchClient.from_settings(settings)
+
+    assert (client.enabled, client.api_url, client.timeout) == (True, "http://x", 3.5)
+
+
+def test_search_client_from_settings_disabled():
+    client = SearchClient.from_settings(Settings(SEARCH_MODE="disabled"))
+
+    assert client.enabled is False

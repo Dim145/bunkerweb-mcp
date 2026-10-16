@@ -56,6 +56,7 @@ async def test_http_protocol_auth_security_resources_and_search(monkeypatch, tmp
         MCP_ALLOWED_HOSTS=" localhost, localhost:8080 ",
         MCP_ALLOWED_ORIGINS=" http://localhost ",
         CACHE_ENABLED=False,
+        SEARCH_MODE="remote",
     )
     upstream = SimpleNamespace(
         close=AsyncMock(),
@@ -91,7 +92,6 @@ async def test_http_protocol_auth_security_resources_and_search(monkeypatch, tmp
         doc_id="guide",
     )
     search = AsyncMock(return_value=[search_result])
-    monkeypatch.setenv("SEARCH_MODE", "remote")
     monkeypatch.setattr(SearchClient, "search", search)
     monkeypatch.setattr("bunkerweb_mcp.main.get_settings", lambda: settings)
     for module in ("ban_handlers", "config_handlers", "instance_handlers"):

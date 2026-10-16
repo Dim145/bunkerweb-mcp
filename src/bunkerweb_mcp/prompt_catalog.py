@@ -36,7 +36,7 @@ class PromptCatalog:
 def load_catalog(settings: Settings) -> PromptCatalog:
     """Load the prompt catalog referenced by ``settings``."""
 
-    candidate_path = getattr(settings, "prompt_catalog_path", None) or DEFAULT_PROMPT_FILE
+    candidate_path = settings.prompt_catalog_path or DEFAULT_PROMPT_FILE
     try:
         raw = candidate_path.read_text(encoding="utf-8")
     except FileNotFoundError:

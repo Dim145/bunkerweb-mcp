@@ -131,9 +131,10 @@ def _build_stubbed_app(
     *,
     logs_path: Path | None = None,
     token: str | None = "secret",
+    **overrides: Any,
 ):
     tools = StubTools()
-    settings = StubSettings()
+    settings = StubSettings(**overrides)
     settings.bunkerweb_logs_path = logs_path
     settings.websocket_token = token
 
@@ -408,3 +409,28 @@ async def test_websocket_handles_unknown_tool(app_fixture) -> None:
         await ws.send_text(json.dumps({"id": "req-1", "tool": "missing", "params": {}}))
         message = json.loads(await ws.receive_text())
         assert message["error"]["code"] == "unknown_tool"
+
+
+@pytest.mark.asyncio
+async def test_ws_rate_limit_follows_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    app, _, _ = _build_stubbed_app(
+        monkeypatch, token=None, rate_limit_enabled=True, rate_limit_ws="2/minute"
+    )
+
+    async with WebSocketSession(app, "/ws") as ws:
+        replies = []
+        for index in range(3):
+            await ws.send_text(json.dumps({"id": index, "tool": "missing", "params": {}}))
+            replies.append(json.loads(await ws.receive_text()))
+
+    assert [r["error"]["code"] for r in replies] == [
+        "unknown_tool",
+        "unknown_tool",
+        "rate_limit_exceeded",
+    ]
+    assert replies[2]["error"]["message"] == "Rate limit exceeded: max 2 messages per 60s"
+
+
+def test_invalid_ws_rate_limit_names_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(RuntimeError, match="RATE_LIMIT_WS"):
+        _build_stubbed_app(monkeypatch, rate_limit_ws="often")

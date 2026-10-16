@@ -101,7 +101,7 @@ def create_fastmcp_server(settings: Settings, tools: Tools) -> MCPServer:
     _register_resources(server, tools)
 
     # Register semantic search tool
-    _register_search_tool(server)
+    _register_search_tool(server, settings)
 
     return server
 
@@ -215,7 +215,7 @@ def _register_resources(server: MCPServer, tools: Tools) -> None:
     )
 
 
-def _register_search_tool(server: MCPServer) -> None:
+def _register_search_tool(server: MCPServer, settings: Settings) -> None:
     """Register the semantic search tool for BunkerWeb documentation."""
     import logging
 
@@ -225,8 +225,7 @@ def _register_search_tool(server: MCPServer) -> None:
     try:
         from .search_client import SearchClient
 
-        # Create client from environment variables
-        search_client = SearchClient.from_env()
+        search_client = SearchClient.from_settings(settings)
 
         if not search_client.enabled:
             logger.info("Search is disabled (SEARCH_MODE=disabled)")
