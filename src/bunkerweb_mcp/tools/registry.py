@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import BunkerWebError, ToolExecutionError, ToolValidationError
+from ..redaction import withheld_error
 from . import (
     ban_handlers,
     cache_handlers,
@@ -301,7 +302,13 @@ class Tools:
 
         async def redacted(params: Any) -> dict[str, Any]:
             policy.check_call(name, params)
-            return policy.redact_result(name, await handler(params))
+            try:
+                result = await handler(params)
+            except (ToolValidationError, ToolExecutionError):
+                raise
+            except Exception as exc:  # noqa: BLE001 - upstream details may hold secrets
+                raise withheld_error(exc) from None
+            return policy.redact_result(name, result)
 
         return redacted
 

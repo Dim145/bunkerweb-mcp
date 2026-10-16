@@ -3,19 +3,25 @@
 import base64
 import copy
 import json
+import logging
 import re
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from asgi import WebSocketSession
+from fastapi import FastAPI
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import ValidationError
 
 from bunkerweb_mcp.client import BunkerWebClient
 from bunkerweb_mcp.config import Settings
-from bunkerweb_mcp.exceptions import ToolValidationError
+from bunkerweb_mcp.exceptions import BunkerWebError, ToolExecutionError, ToolValidationError
+from bunkerweb_mcp.main import create_app
 from bunkerweb_mcp.mcp_adapter import create_fastmcp_server
 from bunkerweb_mcp.redaction import (
     DEFAULT_REDACT_PATTERN,
@@ -570,3 +576,188 @@ def test_effective_cache_file_name() -> None:
     assert effective_cache_file_name("folder:instance.id") == "instance.id"
     assert effective_cache_file_name("folder:a_b_c.pem") == "a/b/c.pem"
     assert effective_cache_file_name("plain_name.txt") == "plain_name.txt"
+
+
+UPSTREAM_SECRET = "review-synthetic-secret-17"
+
+UpstreamHandler = Callable[[httpx.Request], httpx.Response]
+
+
+def _error_body_response(error_body: str) -> UpstreamHandler:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if error_body == "json":
+            return httpx.Response(
+                400, json={"status": "error", "message": f"REDIS_PASSWORD={UPSTREAM_SECRET}"}
+            )
+        return httpx.Response(400, text=f"REDIS_PASSWORD={UPSTREAM_SECRET}")
+
+    return handler
+
+
+def _upstream_settings(monkeypatch: pytest.MonkeyPatch, *, redact: bool = True) -> Settings:
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        BUNKERWEB_REDACT_SECRETS=redact,
+        BUNKERWEB_BASE_URL="http://upstream.invalid",
+        SEARCH_MODE="disabled",
+        CACHE_ENABLED=False,
+        BUNKERWEB_MAX_RETRIES=1,
+        MCP_ALLOWED_HOSTS="testserver",
+    )
+    monkeypatch.setattr("bunkerweb_mcp.main.get_settings", lambda: settings)
+    for module in ("config_handlers", "service_handlers", "instance_handlers", "ban_handlers"):
+        monkeypatch.setattr(f"bunkerweb_mcp.tools.{module}.get_settings", lambda: settings)
+    return settings
+
+
+@asynccontextmanager
+async def _upstream_client(
+    settings: Settings, handler: UpstreamHandler
+) -> AsyncIterator[BunkerWebClient]:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://upstream.invalid"
+    ) as upstream:
+        yield BunkerWebClient(settings, client=upstream)
+
+
+@asynccontextmanager
+async def _running_app(
+    monkeypatch: pytest.MonkeyPatch, handler: UpstreamHandler, *, redact: bool = True
+) -> AsyncIterator[FastAPI]:
+    settings = _upstream_settings(monkeypatch, redact=redact)
+    async with _upstream_client(settings, handler) as client:
+        monkeypatch.setattr("bunkerweb_mcp.main.BunkerWebClient", lambda settings: client)
+        app = create_app()
+        async with app.router.lifespan_context(app):
+            yield app
+
+
+async def _wire_text(app: FastAPI, path: str) -> str:
+    """Return the raw reply of one global-config read over the given transport."""
+    if path == "ws":
+        async with WebSocketSession(app, "/ws") as ws:
+            await ws.send_json({"id": 1, "tool": "global_config_read", "params": {}})
+            return await ws.receive_text()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://testserver"
+    ) as http:
+        if path == "rpc":
+            response = await http.post(
+                "/rpc", json={"id": 1, "tool": "global_config_read", "params": {}}
+            )
+            assert response.status_code == 502
+            return response.text
+        method, params = (
+            ("tools/call", {"name": "global_config_read", "arguments": {}})
+            if path == "mcp-tool"
+            else ("resources/read", {"uri": "config://global"})
+        )
+        response = await http.post(
+            "/mcp/",
+            headers={"accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+        )
+        assert response.status_code == 200
+        return response.text
+
+
+def _assert_nothing_logged(caplog: pytest.LogCaptureFixture) -> None:
+    assert UPSTREAM_SECRET not in caplog.text
+    for record in caplog.records:
+        assert UPSTREAM_SECRET not in record.getMessage()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["rpc", "ws", "mcp-tool", "mcp-resource"])
+@pytest.mark.parametrize("error_body", ["json", "text"])
+async def test_upstream_error_body_is_withheld(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, path: str, error_body: str
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    async with _running_app(monkeypatch, _error_body_response(error_body)) as app:
+        wire = await _wire_text(app, path)
+
+    assert "HTTP 400" in wire
+    assert "details withheld" in wire
+    assert UPSTREAM_SECRET not in wire
+    _assert_nothing_logged(caplog)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [503, 599])
+async def test_upstream_5xx_is_withheld(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, code: int
+) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(code, text=f"REDIS_PASSWORD={UPSTREAM_SECRET}")
+
+    async with _running_app(monkeypatch, handler) as app:
+        wire = await _wire_text(app, "mcp-tool")
+
+    assert f"HTTP {code}" in wire
+    assert "details withheld" in wire
+    assert UPSTREAM_SECRET not in wire
+    _assert_nothing_logged(caplog)
+
+
+@pytest.mark.asyncio
+async def test_invalid_upstream_payload_is_generic(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    settings = _upstream_settings(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": 1234, "data": UPSTREAM_SECRET})
+
+    async with _upstream_client(settings, handler) as client:
+        server = create_fastmcp_server(settings, _tools(client))
+        with pytest.raises(ToolError) as excinfo:
+            await server.call_tool("global_config_read", {})
+
+    assert str(excinfo.value).endswith("Unexpected tool execution error")
+    assert UPSTREAM_SECRET not in str(excinfo.value)
+    _assert_nothing_logged(caplog)
+
+
+@pytest.mark.asyncio
+async def test_local_error_message_passes_through(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    client = SimpleNamespace(
+        ban=AsyncMock(side_effect=BunkerWebError("Ban payload must not be empty"))
+    )
+
+    with pytest.raises(ToolExecutionError, match="Ban payload must not be empty"):
+        await _call(_tools(client), "ban_ip", {"bans": [{"ip": "192.0.2.1"}]})
+
+    _assert_nothing_logged(caplog)
+
+
+@pytest.mark.asyncio
+async def test_errors_unchanged_when_redaction_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    async with _running_app(monkeypatch, _error_body_response("json"), redact=False) as app:
+        wire = await _wire_text(app, "rpc")
+
+    assert f"REDIS_PASSWORD={UPSTREAM_SECRET}" in wire
+
+
+@pytest.mark.asyncio
+async def test_withheld_error_drops_cause(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    client = SimpleNamespace(
+        read_global_config=AsyncMock(side_effect=RuntimeError(UPSTREAM_SECRET))
+    )
+    _, model, handler, _, _ = next(
+        entry for entry in _tools(client).iter_registered() if entry[0] == "global_config_read"
+    )
+
+    with pytest.raises(ToolExecutionError) as excinfo:
+        await handler(model.model_validate({}))
+
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__suppress_context__ is True
+    assert UPSTREAM_SECRET not in str(excinfo.value)
+    _assert_nothing_logged(caplog)
