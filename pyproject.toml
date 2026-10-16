@@ -71,7 +71,7 @@ version = {attr = "bunkerweb_mcp.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-bunkerweb_mcp = ["data/*.json"]
+bunkerweb_mcp = ["data/*.json", "data/skills/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
