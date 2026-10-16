@@ -11,6 +11,7 @@ from bunkerweb_mcp.mcp_adapter import (
     create_fastmcp_server,
 )
 from bunkerweb_mcp.search_client import SearchClient
+from bunkerweb_mcp.skill_catalog import SKILL_URI_PREFIX, load_skills
 
 
 class StubFieldInfo:
@@ -216,24 +217,75 @@ async def test_resources_are_registered():
 
         create_fastmcp_server(settings, tools)
 
-        # Check that add_resource was called 4 times (one for each resource)
-        assert mock_server.add_resource.call_count == 4
+        # 4 data resources plus one per bundled skill file
+        assert mock_server.add_resource.call_count == 4 + sum(
+            len(skill.files) for skill in load_skills()
+        )
 
-        # Get the URIs of all registered resources
-        resource_uris = set()
-        for call in mock_server.add_resource.call_args_list:
-            resource = call[0][0]
-            if hasattr(resource, "uri"):
-                resource_uris.add(str(resource.uri))
-
-        # Verify all expected resources were registered
-        expected_uris = {
+        resource_uris = {str(c[0][0].uri) for c in mock_server.add_resource.call_args_list}
+        assert {u for u in resource_uris if not u.startswith("skill://")} == {
             "config://global",
             "logs://jobs",
             "bans://active",
             "instances://status",
         }
-        assert resource_uris == expected_uris
+        assert "skill://bunkerweb/bunkerweb/SKILL.md" in resource_uris
+
+
+def test_skill_resource_names_are_paths_relative_to_the_skill():
+    """The skill name in the URI authority must not leak into reference-file names."""
+    settings = Settings(bunkerweb_base_url="http://test:8888")
+
+    with patch("bunkerweb_mcp.mcp_adapter.MCPServer") as mock_fastmcp:
+        mock_server = MagicMock()
+        mock_fastmcp.return_value = mock_server
+
+        create_fastmcp_server(settings, StubTools())
+
+        names = {
+            str(c[0][0].uri): c[0][0].name
+            for c in mock_server.add_resource.call_args_list
+            if str(c[0][0].uri).startswith("skill://")
+        }
+
+    for skill in load_skills():
+        for file in skill.files:
+            prefix = f"{SKILL_URI_PREFIX}/{skill.name}/"
+            expected = skill.name if file.uri == skill.uri else file.uri.removeprefix(prefix)
+            assert names[file.uri] == expected
+    assert (
+        names["skill://bunkerweb/bunkerweb/references/all-in-one.md"] == "references/all-in-one.md"
+    )
+
+
+def test_skills_disabled_registers_nothing():
+    """MCP_ENABLE_SKILLS=false keeps skill:// URIs and the instructions sentence out."""
+    settings = Settings(bunkerweb_base_url="http://test:8888", MCP_ENABLE_SKILLS=False)
+
+    with patch("bunkerweb_mcp.mcp_adapter.MCPServer") as mock_fastmcp:
+        mock_server = MagicMock()
+        mock_fastmcp.return_value = mock_server
+
+        create_fastmcp_server(settings, StubTools())
+
+        uris = [str(c[0][0].uri) for c in mock_server.add_resource.call_args_list]
+        assert len(uris) == 4
+        assert not any(u.startswith("skill://") for u in uris)
+        assert "Agent Skills" not in mock_fastmcp.call_args.kwargs["instructions"]
+
+
+def test_skills_enabled_adds_instructions_sentence():
+    settings = Settings(bunkerweb_base_url="http://test:8888")
+
+    with patch("bunkerweb_mcp.mcp_adapter.MCPServer") as mock_fastmcp:
+        mock_fastmcp.return_value = MagicMock()
+
+        create_fastmcp_server(settings, StubTools())
+
+        assert (
+            "BunkerWeb Agent Skills are served as resources under skill://bunkerweb/; "
+            "start with skill://bunkerweb/bunkerweb/SKILL.md."
+        ) in mock_fastmcp.call_args.kwargs["instructions"]
 
 
 def test_search_client_from_settings():
