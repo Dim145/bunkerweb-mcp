@@ -12,12 +12,13 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 
 WORKDIR /build
 
+COPY requirements-build.txt requirements.txt ./
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-# Build wheels (no PyTorch or ML dependencies needed)
-RUN pip install --upgrade pip && \
-    pip wheel --wheel-dir /wheels .
+# Build tools come from the hash-pinned lock; only the project itself is built here
+RUN pip install --no-cache-dir --require-hashes --no-deps -r requirements-build.txt && \
+    pip wheel --no-cache-dir --no-deps --no-build-isolation --wheel-dir /wheels .
 
 # Runtime stage
 FROM python:3.14-slim@sha256:c3e521df8b2b498a7a682e7e18676771cb80c6b75b8699af886b2d554ce40151 AS runtime
@@ -34,9 +35,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpcre2-8-0 &&
 
 # Install Python packages from builder
 COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir /wheels/* && \
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --require-hashes --no-deps -r requirements.txt && \
+    pip install --no-cache-dir --no-deps /wheels/*.whl && \
+    pip check && \
     pip uninstall -y setuptools wheel pip && \
-    rm -rf /wheels ~/.cache/pip
+    rm -rf /wheels requirements.txt ~/.cache/pip
 
 # Search configuration (optional)
 # Set SEARCH_MODE=remote and SEARCH_API_URL to use search service
