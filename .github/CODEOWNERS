@@ -1,0 +1,5 @@
+*.in              @TheophileDiot
+requirements*.txt @TheophileDiot
+Dockerfile*       @TheophileDiot
+/.github/         @TheophileDiot
+/.plumber.yaml    @TheophileDiot
