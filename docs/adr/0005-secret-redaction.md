@@ -85,9 +85,13 @@ refusing sensitive keys does not delete existing secrets.
 
 ### Positive
 
-- Secrets in settings and the job cache no longer reach LLM clients when enabled
-- One code path covers every transport and resource, current and future tools
-- Disabled by default: no behavior change for existing deployments
+- When enabled, sensitive setting values are masked, denylisted job-cache files are refused and upstream error
+  bodies are withheld before results reach LLM clients. `logs_read` output and documentation search stay outside
+  this boundary (see [Secret redaction](../security.md#secret-redaction))
+- One wrapper in the tool registry covers every registry consumer (`/rpc`, `/ws`, MCP tools and the MCP
+  resources); tools registered outside the registry are not covered
+- Redaction is disabled by default. API path-segment validation applies whether redaction is on or off:
+  identifiers containing path separators, `%`, control characters or `.`/`..` are refused
 
 ### Negative
 
@@ -100,9 +104,32 @@ refusing sensitive keys does not delete existing secrets.
 
 ### Neutral
 
-- Custom configuration snippets (`config_get`, `configs_list` with `with_data`) are
-  free-form text and are not redacted; documented as a known limitation
-- Secrets embedded in non-sensitive values (credentials in a URL) are not detected
+- The guarantee is masking by setting name, in tool results and resources, plus withheld
+  upstream error bodies. It is not a content scanner. The exceptions are documented in the
+  Security Guide: custom configuration snippets (`config_get`, `configs_list` with
+  `with_data`), `logs_read` lines, documentation search results (public documentation from a
+  separate service, registered outside the registry), cache files outside the plugin and
+  file-name denylist, and secrets embedded in non-sensitive values (credentials in a URL)
+- A custom `BUNKERWEB_REDACT_PATTERN` with nested quantifiers (`(a+)+$`) can backtrack
+  catastrophically in `re.search`; operators must keep it simple
+
+## Revisions (2026-10-16)
+
+The status stays Proposed. Review of the first implementation found two gaps, fixed before
+merge:
+
+1. **Path segments.** Service, hostname, plugin, job, cache file and config type and name
+   were interpolated into API URL paths unchecked, so a value such as `x/../../letsencrypt/job`,
+   a percent-encoded `%69nstance.id` or a `folder:instance.id` token could reach a cache file
+   the policy refuses. The client now rejects
+   `/`, `\`, `%`, control characters, `.` and `..` and percent-encodes the rest, with or
+   without redaction. The cache file check uses the name BunkerWeb looks up after it
+   transforms a `folder:` token (`_` becomes `/`).
+2. **Upstream errors.** API error bodies can echo submitted or stored values and were passed
+   to the client. With redaction enabled, the registry wrapper now returns the HTTP status
+   only (`BunkerWeb API error (HTTP {status}); details withheld because
+   BUNKERWEB_REDACT_SECRETS is enabled`) and `Unexpected tool execution error` for any other
+   failure.
 
 ## Notes
 

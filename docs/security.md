@@ -238,8 +238,13 @@ Enable redaction when an LLM client or an aggregator sits in front of the server
 BUNKERWEB_REDACT_SECRETS=true
 ```
 
-The option is off by default. When enabled, it applies to every tool call and resource read,
-whatever the transport (`/mcp`, `/rpc`, `/ws`, stdio).
+The option is off by default. When enabled, it applies to every tool call and resource read
+that goes through the tool registry, whatever the transport (`/mcp`, `/rpc`, `/ws`, stdio).
+
+The guarantee is narrow: values are masked **by setting name**, in tool results and
+resources, and upstream error bodies are withheld. It is not a content scanner. Anything the
+masking cannot recognise by name is returned as is; see [Known limitations](#known-limitations)
+for the exceptions.
 
 ### Masked outputs
 
@@ -256,6 +261,39 @@ With `methods=true`, only `value` and `default` are masked and the metadata stay
 Keys suffixed for multiple settings (`AUTH_BASIC_PASSWORD_1`) and prefixed by a server name
 in the multisite global view (`www.example.com_REDIS_PASSWORD`) are matched too. The Biscuit
 token returned by the `authenticate` tool is masked as well.
+
+### Upstream errors
+
+An error body returned by the BunkerWeb API can echo submitted or stored values, so with
+redaction enabled a failed API call reaches the client with the HTTP status only:
+
+```text
+BunkerWeb API error (HTTP 422); details withheld because BUNKERWEB_REDACT_SECRETS is enabled
+```
+
+Any other unexpected failure is reported as `Unexpected tool execution error`. Errors the
+server raises itself keep their message: a refused write, and a rejected path segment (see
+[Path segments](#path-segments)).
+
+### Path segments
+
+Identifiers that the server places in a BunkerWeb API URL path are validated before the
+request is sent: service, hostname, plugin id, job name, cache file name, and custom config
+type and name. A value is rejected when it is empty, equals `.` or `..`, or contains `/`,
+`\`, `%` or a control character:
+
+```text
+Invalid service: path separators, percent signs, control characters and '.'/'..' are not allowed
+```
+
+Accepted values are percent-encoded. The check runs whether or not redaction is enabled. It
+stops a caller from steering a request to another API route, for example to a cache file that
+the redaction policy refuses to return.
+
+For the cache, the policy checks the file name BunkerWeb will actually look up. BunkerWeb
+turns a `folder:` token into a path by dropping the prefix and replacing every `_` with `/`,
+so `folder:a_b.key` is checked as `a/b.key`. Local log sources read by `logs_list` and
+`logs_read` are not API paths and are not affected.
 
 ### Refused writes
 
@@ -301,9 +339,24 @@ the server fail at startup.
 
 - Custom configuration snippets (`config_get`, and `configs_list` with `with_data=true`) are
   free-form nginx or ModSecurity text and are **not** redacted. Do not store secrets in them.
+- Log lines returned by `logs_read` are free text and are **not** redacted. A line can contain
+  a token, a password in a query string or any value a request carried. Leave `BUNKERWEB_LOGS_PATH`
+  unset when clients must not see such content.
+- Documentation search (`search_bunkerweb_docs`) is registered outside the tool registry and
+  is outside the redaction boundary. It returns public documentation from a separate service,
+  so no secret is expected in its results, and the placeholder check on tool parameters does
+  not apply to it. If the service returns a malformed result, the
+  resulting validation error is logged by the server without redaction.
+- Cache files are protected by a denylist: the `letsencrypt`, `customcert`, `selfsigned` and
+  `crowdsec` plugins, and file names ending in `.key`, `key.pem` or equal to `instance.id`.
+  A plugin not on the list can store a secret under an ordinary file name, and that file is
+  returned as is.
 - Detection relies on setting names. A secret held by an external plugin setting that does
   not match the pattern, or embedded in a non-sensitive value (credentials inside a URL), is
   returned as is. Extend `BUNKERWEB_REDACT_PATTERN` for such plugins.
+- `BUNKERWEB_REDACT_PATTERN` is compiled with Python's `re` and run with `re.search` against
+  every key of every result. A pattern with nested quantifiers, such as `(a+)+$`, backtracks
+  catastrophically on a crafted key and stalls the server. Keep custom patterns simple.
 - The in-memory response cache keeps raw API responses; redaction applies on each read.
 
 ## References
